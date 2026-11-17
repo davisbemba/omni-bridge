@@ -184,6 +184,24 @@ fn unpause_unauthorized() {
     );
 }
 
+pub fn build_set_derived_near_bridge_address_ix(
+    program_id: &Pubkey,
+    config_pda: &Pubkey,
+    signer: &Pubkey,
+    derived: &[u8; 64],
+) -> Instruction {
+    let mut data = anchor_ix_discriminator("set_derived_near_bridge_address").to_vec();
+    data.extend_from_slice(derived);
+    Instruction::new_with_bytes(
+        *program_id,
+        &data,
+        vec![
+            AccountMeta::new(*config_pda, false),
+            AccountMeta::new(*signer, true),
+        ],
+    )
+}
+
 #[test]
 fn set_admin_happy_path() {
     let (mollusk, program_id) = setup_mollusk();
@@ -329,6 +347,59 @@ fn set_metadata_admin_unauthorized() {
     );
 
     let ix = build_set_metadata_admin_ix(&program_id, &config_pda, &random, &new_metadata_admin);
+    let result = mollusk.process_instruction(
+        &ix,
+        &[(config_pda, config_account), (random, create_signer_account(1_000_000_000))],
+    );
+
+    assert_eq!(
+        result.program_result,
+        ProgramResult::Failure(ProgramError::Custom(6009))
+    );
+}
+
+#[test]
+fn set_derived_near_bridge_address_happy_path() {
+    let (mollusk, program_id) = setup_mollusk();
+    let admin = Pubkey::new_unique();
+    let old = [0x11u8; 64];
+    let new = [0x22u8; 64];
+
+    let (config_pda, config_account) = create_config_account(
+        &program_id,
+        &ConfigParams {
+            admin,
+            derived_near_bridge_address: old,
+            ..Default::default()
+        },
+    );
+
+    let ix = build_set_derived_near_bridge_address_ix(&program_id, &config_pda, &admin, &new);
+    let result = mollusk.process_instruction(
+        &ix,
+        &[(config_pda, config_account), (admin, create_signer_account(1_000_000_000))],
+    );
+
+    assert!(!result.program_result.is_err(), "{:?}", result.program_result);
+    let config = deserialize_config(&result.resulting_accounts[0].1.data);
+    assert_eq!(config.derived_near_bridge_address, new);
+}
+
+#[test]
+fn set_derived_near_bridge_address_unauthorized() {
+    let (mollusk, program_id) = setup_mollusk();
+    let admin = Pubkey::new_unique();
+    let random = Pubkey::new_unique();
+
+    let (config_pda, config_account) = create_config_account(
+        &program_id,
+        &ConfigParams {
+            admin,
+            ..Default::default()
+        },
+    );
+
+    let ix = build_set_derived_near_bridge_address_ix(&program_id, &config_pda, &random, &[0x22u8; 64]);
     let result = mollusk.process_instruction(
         &ix,
         &[(config_pda, config_account), (random, create_signer_account(1_000_000_000))],
